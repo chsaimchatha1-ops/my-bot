@@ -173,21 +173,21 @@ async function runTestSuite() {
     assert(broadcast.hasPendingStatus() === false, 'Pending session must be cleared upon successful posting');
 
     // Verify WhatsApp protocol dispatch
-    // Step 1: Relayed to STORIES_JID with statusJidList
-    const storyRelay = relayedMessages.find(m => m.jid === 'status@broadcast');
-    assert(storyRelay, 'MUST relay story to status@broadcast');
-    assert(storyRelay.options.statusJidList.length >= 3, 'Audience must include group participants');
-    assert(storyRelay.options.additionalNodes.some(n => n.tag === 'meta'), 'Must include meta node for mentioned_users');
+    // Step 1: Sent to STORIES_JID with statusJidList & group mention context
+    const storyMsg = sentMessages.find(m => m.jid === 'status@broadcast');
+    assert(storyMsg, 'MUST send story to status@broadcast');
+    assert(storyMsg.options.statusJidList.length >= 3, 'Audience must include group participants');
+    assert(storyMsg.options.additionalNodes.some(n => n.tag === 'meta'), 'Must include meta node for mentioned_users');
+    assert(storyMsg.content.contextInfo?.groupMentions?.length > 0, 'Must include groupMentions context info');
 
-    // Step 2: Relayed groupStatusMentionMessage (Type 25) to target group (Boys: 120363423251922928@g.us)
-    const mentionRelay = relayedMessages.find(m => m.jid === '120363423251922928@g.us');
-    assert(mentionRelay, 'MUST relay mention message to Boys group container');
-    assert(mentionRelay.options.additionalNodes.some(n => n.attrs?.is_group_status_mention === 'true'), 'Must have is_group_status_mention meta attr');
+    // Step 2: STRICT: ZERO messages inside the group chat!
+    const groupChatMsg = sentMessages.find(m => m.jid === '120363423251922928@g.us');
+    assert(!groupChatMsg, 'STRICT REQUIREMENT: MUST NOT send any message into group chat!');
 
     // Step 3: Confirmation delivered to user
     const confirmMsg = sentMessages.find(m => m.content?.text?.includes('GROUP KE UPAR STATUS (GROUP STORY) LAG GAYA'));
     assert(confirmMsg, 'Must send final success confirmation to user');
-    console.log('✅ TEST 5 PASSED: Full triple-stage Group Story protocol successfully verified.\n');
+    console.log('✅ TEST 5 PASSED: Group Story published to status@broadcast with ZERO group chat spam.\n');
 
     // -------------------------------------------------------------------------
     // TEST 6: User sends Urdu "اسٹیٹس 4" or alias "voice"
@@ -217,8 +217,11 @@ async function runTestSuite() {
         'owner'
     );
     assert(urduSuccess === true);
-    assert(relayedMessages.some(m => m.jid === '120363423251922928@g.us'), 'Urdu input must match Boys');
-    console.log('✅ TEST 6 PASSED: Urdu input "اسٹیٹس 4" matches Boys cleanly.\n');
+    const urduStory = sentMessages.find(m => m.jid === 'status@broadcast' && m.content?.contextInfo?.groupMentions?.[0]?.groupSubject === 'Boys');
+    assert(urduStory, 'Urdu input must match Boys and post story to status@broadcast');
+    const urduGroupMsg = sentMessages.find(m => m.jid === '120363423251922928@g.us');
+    assert(!urduGroupMsg, 'STRICT: Must NOT send any message to group chat for Urdu input');
+    console.log('✅ TEST 6 PASSED: Urdu input "اسٹیٹس 4" matches Boys cleanly and posts story without chat spam.\n');
 
     console.log('====================================================');
     console.log('🎉 ALL 6 COMPREHENSIVE TESTS PASSED 100% CLEANLY!');

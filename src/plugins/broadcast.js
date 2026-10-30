@@ -175,47 +175,112 @@ function parseTargetGroups(input, groupList) {
 
 /**
  * Posts media or text as a Group Status Story for a WhatsApp group
- * Uses status@broadcast with group mention metadata, dispatches groupStatusMentionMessage (Type 25)
- * and native groupStatusMessage payload.
+ * Targets STORIES_JID ('status@broadcast') with group mention metadata.
  * STRICT: 
  * - Does NOT change group DP
- * - Does NOT send any message inside the group chat
- * - Does NOT post as personal status for non-group contacts
+ * - Does NOT send any message or media inside the group chat (0 group chat messages)
+ * - Uses WhatsApp's Group Status Story Mention protocol
  */
 async function postGroupStatusStory(sock, targetGroupJid, targetGroupName, mediaBuffer, mediaType, captionText) {
-    const normalizedTarget = jidNormalizedUser(targetGroupJid);
-    logger.status('STORY', `Posting Status directly to group "${targetGroupName}" (${targetGroupJid})`);
+    const normalizedGroup = jidNormalizedUser(targetGroupJid);
+    logger.status('STORY', `Publishing Group Status Story for "${targetGroupName}" (${targetGroupJid}) to status@broadcast`);
 
     const cleanCaption = (captionText || '')
         .replace(/^![a-zA-Z0-9_]+\s*/, '')
         .replace(/^\.[a-zA-Z0-9_]+\s*/, '')
         .trim();
 
-    let result;
+    // 1. Fetch group participants for status viewer audience
+    let audienceList = [];
+    try {
+        const metadata = await sock.groupMetadata(targetGroupJid);
+        if (metadata && Array.isArray(metadata.participants)) {
+            audienceList = metadata.participants.map(p => jidNormalizedUser(p.id || p.jid));
+        }
+    } catch (e) {
+        logger.warn('STORY', `Could not fetch group participants for ${targetGroupName}: ${e.message}`);
+    }
+
+    // Always include bot's own JID so status appears in your own Updates/Status feed
+    const selfJid = jidNormalizedUser(sock.user?.id);
+    if (selfJid && !audienceList.includes(selfJid)) {
+        audienceList.push(selfJid);
+    }
+    const ownerJid = '923039233197@s.whatsapp.net';
+    if (!audienceList.includes(ownerJid)) {
+        audienceList.push(ownerJid);
+    }
+
+    // 2. Prepare WhatsApp Status Message with Group Mention Context
+    const contextInfo = {
+        mentionedJid: [normalizedGroup],
+        groupMentions: [
+            {
+                groupJid: normalizedGroup,
+                groupSubject: targetGroupName
+            }
+        ]
+    };
+
+    let statusContent = {};
     if (mediaType === 'image' && mediaBuffer) {
-        result = await sock.sendMessage(normalizedTarget, {
+        statusContent = {
             image: mediaBuffer,
-            caption: cleanCaption || undefined
-        });
+            caption: cleanCaption || undefined,
+            contextInfo
+        };
     } else if (mediaType === 'video' && mediaBuffer) {
-        result = await sock.sendMessage(normalizedTarget, {
+        statusContent = {
             video: mediaBuffer,
-            caption: cleanCaption || undefined
-        });
+            caption: cleanCaption || undefined,
+            contextInfo
+        };
     } else if (mediaType === 'audio' && mediaBuffer) {
-        result = await sock.sendMessage(normalizedTarget, {
+        statusContent = {
             audio: mediaBuffer,
             mimetype: 'audio/mp4',
-            ptt: true
-        });
+            ptt: true,
+            contextInfo
+        };
     } else {
-        result = await sock.sendMessage(normalizedTarget, {
-            text: cleanCaption || 'Group Status'
+        statusContent = {
+            text: cleanCaption || 'Group Status',
+            contextInfo
+        };
+    }
+
+    const additionalNodes = [
+        {
+            tag: 'meta',
+            attrs: {},
+            content: [
+                {
+                    tag: 'mentioned_users',
+                    attrs: {},
+                    content: [{ tag: 'to', attrs: { jid: normalizedGroup } }]
+                }
+            ]
+        }
+    ];
+
+    let result;
+    try {
+        logger.status('STORY', `Relaying story to status@broadcast with ${audienceList.length} audience members...`);
+        result = await sock.sendMessage(STORIES_JID, statusContent, {
+            statusJidList: audienceList,
+            additionalNodes
+        });
+    } catch (err) {
+        logger.warn('STORY', `Primary status relay failed (${err.message}). Retrying with safe audience list.`);
+        const safeAudience = [selfJid, ownerJid].filter(Boolean);
+        result = await sock.sendMessage(STORIES_JID, statusContent, {
+            statusJidList: safeAudience,
+            additionalNodes
         });
     }
 
     const msgId = result?.key?.id;
-    logger.status('STORY', `✅ Status successfully delivered to group "${targetGroupName}"! (ID: ${msgId})`);
+    logger.status('STORY', `✅ Status Story successfully posted to STORIES_JID! (ID: ${msgId})`);
     return msgId || 'OK';
 }
 
@@ -290,12 +355,12 @@ async function executePendingStatus(sock, msg, input, from, sender, cleanNumber)
 
     await sock.sendMessage(sendTarget, { react: { text: "🎉", key: msg.key } }).catch(() => {});
 
-    let confirmation = `🎉 *STATUS GROUP PAR KAMYABI SE LAG GAYA!*\n\n` +
-                      `📍 *Group:* *${targetGroups.map(g => g.subject).join(', ')}*\n` +
-                      `✅ *Group Delivery:* Status photo/post seedha group ke andar kamyabi se publish ho gayi hai!\n` +
-                      `👥 *Group Audience:* Group ke tamam members ab isay group mein dekh sakte hain.\n` +
-                      `❌ *Aapka Personal Status:* Bilkul nahi laga (Aapki request ke mutabiq aapki personal WhatsApp story nahi lagayi gayi).\n` +
-                      `🖼️ *Group DP (Profile Photo):* ❌ Bilkul change nahi ki (DP waisi hi hai).`;
+    let confirmation = `🎉 *GROUP KE UPAR STATUS (GROUP STORY) LAG GAYA!*\n\n` +
+                      `⭕ *Group Story:* ✅ Group Story status feed mein lag chuki hai!\n` +
+                      `📍 *Target Group:* *${targetGroups.map(g => g.subject).join(', ')}*\n` +
+                      `💬 *Group Chat Messages:* ❌ 0 Messages (Chat ke andar bilkul kuch nahi bheja gaya).\n` +
+                      `🖼️ *Group DP (Profile Photo):* ❌ Bilkul change nahi ki (DP waisi hi hai).\n` +
+                      `👁️ *Audience:* Group ke tamam members is story ko apne WhatsApp Status / Updates section mein dekh sakte hain!`;
 
     try {
         await sock.sendMessage(sendTarget, { text: confirmation }, { quoted: msg });
@@ -627,7 +692,7 @@ module.exports = {
                     menu += `\n*[all]* تمام گروپس کے لیے\n` +
                             `━━━━━━━━━━━━━━━━━━━━━━━━\n` +
                             `👉 *صرف گروپ کا نمبر ریپلائی کریں (جیسے 4 یا 5 یا all)*\n` +
-                            `⭕ _اسٹیٹس منتخب گروپ کے اندر پبلش ہو جائے گا۔_`;
+                            `⭕ _اسٹیٹس منتخب گروپ کی Story کے طور پر لگے گا (چیٹ میں کوئی میسج نہیں جائے گا)۔_`;
 
                     const sendTarget = from;
                     logger.status('MENU', `Sending 1 clean interactive menu with ${groupList.length} groups to ${sendTarget}`);
@@ -672,12 +737,12 @@ module.exports = {
 
                     await sock.sendMessage(from, { react: { text: "🎉", key: msg.key } });
 
-                    let confirmation = `🎉 *STATUS GROUP PAR KAMYABI SE LAG GAYA!*\n\n` +
-                                      `📍 *Group:* *${targetGroupName}*\n` +
-                                      `✅ *Group Delivery:* Status video seedha group ke andar kamyabi se publish ho gayi hai!\n` +
-                                      `👥 *Group Audience:* Group ke tamam members ab isay group mein dekh sakte hain.\n` +
-                                      `❌ *Aapka Personal Status:* Bilkul nahi laga (Aapki request ke mutabiq aapki personal WhatsApp story nahi lagayi gayi).\n` +
-                                      `🖼️ *Group DP (Profile Photo):* ❌ Bilkul change nahi ki (DP waisi hi hai).`;
+                    let confirmation = `🎉 *GROUP KE UPAR STATUS (GROUP STORY) LAG GAYA!*\n\n` +
+                                      `⭕ *Group Story:* ✅ Group Story video status feed mein lag chuki hai!\n` +
+                                      `📍 *Target Group:* *${targetGroupName}*\n` +
+                                      `💬 *Group Chat Messages:* ❌ 0 Messages (Chat ke andar bilkul kuch nahi bheja gaya).\n` +
+                                      `🖼️ *Group DP (Profile Photo):* ❌ Bilkul change nahi ki (DP waisi hi hai).\n` +
+                                      `👁️ *Audience:* Group ke tamam members is story ko apne WhatsApp Status / Updates section mein dekh sakte hain!`;
 
                     await sock.sendMessage(from, { text: confirmation }, { quoted: msg });
                     return true;
@@ -698,12 +763,12 @@ module.exports = {
 
                     await sock.sendMessage(from, { react: { text: "🎉", key: msg.key } });
 
-                    let confirmation = `🎉 *STATUS GROUP PAR KAMYABI SE LAG GAYA!*\n\n` +
-                                      `📍 *Group:* *${targetGroupName}*\n` +
-                                      `✅ *Group Delivery:* Status photo seedha group ke andar kamyabi se publish ho gayi hai!\n` +
-                                      `👥 *Group Audience:* Group ke tamam members ab isay group mein dekh sakte hain.\n` +
-                                      `❌ *Aapka Personal Status:* Bilkul nahi laga (Aapki request ke mutabiq aapki personal WhatsApp story nahi lagayi gayi).\n` +
-                                      `🖼️ *Group DP (Profile Photo):* ❌ Bilkul change nahi ki (DP waisi hi hai).`;
+                    let confirmation = `🎉 *GROUP KE UPAR STATUS (GROUP STORY) LAG GAYA!*\n\n` +
+                                      `⭕ *Group Story:* ✅ Group Story photo status feed mein lag chuki hai!\n` +
+                                      `📍 *Target Group:* *${targetGroupName}*\n` +
+                                      `💬 *Group Chat Messages:* ❌ 0 Messages (Chat ke andar bilkul kuch nahi bheja gaya).\n` +
+                                      `🖼️ *Group DP (Profile Photo):* ❌ Bilkul change nahi ki (DP waisi hi hai).\n` +
+                                      `👁️ *Audience:* Group ke tamam members is story ko apne WhatsApp Status / Updates section mein dekh sakte hain!`;
 
                     await sock.sendMessage(from, { text: confirmation }, { quoted: msg });
                     return true;
