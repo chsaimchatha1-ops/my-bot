@@ -417,11 +417,11 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Start Server
-const PORT = config.server.port;
-app.listen(PORT, () => {
+const PORT = process.env.PORT || config.server.port || 3000;
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`====================================================`);
     console.log(`⚡ ${config.brand.name} [${config.brand.version}]`);
-    console.log(`📡 Server running on http://localhost:${PORT}`);
+    console.log(`📡 Server running on http://0.0.0.0:${PORT} (Bound to 0.0.0.0 for Render)`);
     console.log(`🔒 VIP Keys Loaded: ${config.auth.validKeys.length}`);
     console.log(`👑 Admin Numbers Whitelisted: ${config.auth.adminNumbers.length}`);
     console.log(`====================================================`);
