@@ -1,0 +1,32 @@
+{
+  "name": "nova-wa-bot",
+  "version": "1.0.0",
+  "description": "Nova WA Bot - Next-Gen Multi-Session WhatsApp Companion Infrastructure & VIP Automation Engine",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "whatsapp-bot",
+    "baileys",
+    "multi-session",
+    "pairing-code",
+    "qr-code",
+    "automation",
+    "anti-call",
+    "anti-delete"
+  ],
+  "author": "Nova WA Bot Team",
+  "license": "MIT",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.8",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jimp": "^1.6.1",
+    "pino": "^9.0.0",
+    "qrcode": "^1.5.3",
+    "uuid": "^9.0.1"
+  }
+}

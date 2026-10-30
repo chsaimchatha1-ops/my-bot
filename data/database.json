@@ -1,0 +1,15 @@
+{
+  "whitelist": [
+    "3318447030",
+    "3285118386"
+  ],
+  "selectedGroups": [],
+  "selectedGcsGroups": [],
+  "groupSettings": {},
+  "badwords": [
+    "gali",
+    "spam",
+    "scam",
+    "abuse"
+  ]
+}
